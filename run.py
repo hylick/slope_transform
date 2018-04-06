@@ -1,0 +1,168 @@
+"""
+This file runs the linear regressor MVP code. The command line params 
+can be seen in main().
+"""
+
+import tensorflow as tf
+import numpy as np
+import argparse
+import matplotlib.pyplot as plt
+from model import FF
+from gen_data import gen_data
+from pathlib import Path
+import os
+import pickle
+
+NUM_INPUTS = 2
+NUM_OUTPUTS = NUM_INPUTS
+
+cwd = os.getcwd()
+
+def main():
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--mode', default='train')
+  parser.add_argument('--num_inputs', default=NUM_INPUTS)
+  parser.add_argument('--batch_size', default=3)
+  parser.add_argument('--num_neurons', default=2)
+  parser.add_argument('--num_layers', default=1)
+  parser.add_argument('--num_outputs', default=NUM_OUTPUTS)
+  parser.add_argument('--learning_rate', default=0.001)
+  parser.add_argument('--num_epochs', default=10)
+  parser.add_argument('--checkpoint_dir', default='./checkpoints')
+  parser.add_argument('--restore_path', default=None)
+  parser.add_argument('--vars_file', default=None)
+
+  args = parser.parse_args()
+  if args.mode == 'train':
+    train(args)
+  elif args.mode == 'test':
+    test(args)
+
+def restore_graph(sess,args):
+
+  trained_model = tf.train.import_meta_graph(args.restore_path + '.meta')
+  #trained_model.restore(sess, tf.train.latest_checkpoint(cwd + '/checkpoints/.'))
+  trained_model.restore(sess, args.restore_path)
+
+  w = []
+  b = []
+  model_vars_file = args.vars_file  # need to get back w's and b's for gen_data to reproduce same slopes and y-intercepts for lines
+  with open(model_vars_file, 'rb') as f:
+    w,b = pickle.load(f)
+  print('\n\nModel and variables restored.\n\n')
+
+  if (len(w) != int(args.num_inputs)):
+    print('Error: num_inputs length %d does not equal stored variable length %d\n' % (int(args.num_inputs),len(w)))
+    quit()
+
+  return trained_model, w, b
+
+def train(args):
+
+  graph = tf.Graph()
+  var_path = cwd + '/' + args.checkpoint_dir + '/variables/'
+
+  with graph.as_default():
+
+    # Graph object and scope created
+    # ...now define all parts of the graph here
+    feed_fwd_model = FF(args, graph)
+    saver = tf.train.Saver()
+    init = tf.global_variables_initializer()
+
+    # Now that the graph is defined, create a session to begin running
+    with tf.Session() as sess:
+
+      sess.run(init)
+      # Prepare to Save model
+      i = 0
+      model = 'model%s' % i
+      ckpt_file_index = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt.index')
+      ckpt_file = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt')
+      while ckpt_file_index.is_file():
+        i += 1
+        model = 'model%s' % i
+        ckpt_file_index = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt.index')
+      ckpt_file = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt')
+
+      num_epochs = int(args.num_epochs)
+      y_acc = np.zeros((int(args.batch_size),int(args.num_outputs)))
+      loss = None
+      y_ = None
+      
+      w = []
+      b = []
+      if (args.restore_path != None):
+        trained_model_saver, w, b = restore_graph(sess,args)
+        print('...continuing training')
+
+      # guards against accidental updates to the graph which can cause graph
+      # increase and performance decay over time (with more iterations)
+      sess.graph.finalize()
+
+      for e in range(num_epochs):
+        w, b, train_input, train_output = gen_data(int(args.batch_size),int(args.num_inputs), w, b)
+        y_, loss, _ = sess.run(feed_fwd_model.run(), feed_dict={feed_fwd_model.x: train_input, feed_fwd_model.y: train_output})
+        y_acc = y_
+        threshold = 1000
+        w_b_saved = False
+        if ((e % 50) == 0):
+          print('epoch: %d - loss: %2f' % (e,loss))
+          if (e > 0 and (e % threshold == 0)):
+            print('Writing checkpoint %d' % e)
+            print(train_output, w, b)
+            print('\n')
+            print(y_acc, sess.run(feed_fwd_model.weights)[0], sess.run(feed_fwd_model.biases)[0])
+            save_path = saver.save(sess, str(ckpt_file), global_step=e)
+            if not w_b_saved:
+              try:
+                with open(var_path + model + '.pkl', 'wb') as f:
+                  pickle.dump([w,b],f)
+                  w_b_saved = True
+              except FileNotFoundError as fnf:
+                os.makedirs(var_path)
+                with open(var_path + model + '.pkl', 'wb') as f:
+                  pickle.dump([w,b],f)
+                  w_b_saved = True
+      save_path = saver.save(sess, str(ckpt_file))
+      if not w_b_saved:
+        try:
+          with open(var_path + model + '.pkl', 'wb') as f:
+            pickle.dump([w,b],f)
+        except FileNotFoundError as fnf:
+          os.makedirs(var_path)
+          with open(var_path + model + '.pkl', 'wb') as f:
+            pickle.dump([w,b],f)
+      print('Model saved to %s' % str(save_path))
+      sess.close()
+
+def test(args):
+
+  inference_graph = tf.Graph()
+  with tf.Session(graph=inference_graph) as sess:
+
+    if not args.restore_path or not args.vars_file:
+      print('\n\n\tSpecify a restore_path: --restore_path=<path_to_ckpt> and --vars_file=<vars_file_pathname>\n\n')
+      quit()
+    
+    trained_model_saver, w, b = restore_graph(sess,args)
+
+    _y_ = inference_graph.get_tensor_by_name('y_:0')
+    _loss = inference_graph.get_tensor_by_name('loss:0')
+    _x = inference_graph.get_tensor_by_name('x:0')
+    _y = inference_graph.get_tensor_by_name('y:0')
+
+    while(1):
+      w, b, train_input, train_output = gen_data(int(args.batch_size),int(args.num_inputs), w, b)
+      y_ = sess.run(_y_, feed_dict={_x: train_input, _y: train_output})
+      loss = sess.run(_loss, feed_dict={_x: train_input, _y: train_output})
+      y_acc = y_
+      print('Mean Squared Error Loss: %2f\n' % loss)
+      print(train_output)
+      print('\n')
+      print(y_acc)
+      print('\n')
+      input('Press Enter to continue...')
+
+if __name__ == '__main__':
+  main()
