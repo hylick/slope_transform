@@ -33,8 +33,8 @@ def main():
   parser.add_argument('--restore_path', default=None)
   parser.add_argument('--vars_file', default=None)
 
-  parser.add_argument('--ps_hosts', default='')
-  parser.add_argument('--worker_hosts', default='')
+  parser.add_argument('--ps_hosts', default='localhost:2222')
+  parser.add_argument('--worker_hosts', default='localhost:2222')
   parser.add_argument('--job_name', default='worker')
   parser.add_argument('--task_index', default=0)
 
