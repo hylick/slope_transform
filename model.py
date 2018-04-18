@@ -27,7 +27,7 @@ class FF():
     # setup inputs and outputs
     self.x = tf.placeholder(name='x', dtype=tf.float32, shape=[None,self.num_inputs]) # shape = [batch_size, num_inputs]
     self.y = tf.placeholder(name='y', dtype=tf.float32, shape=[None,self.num_outputs]) # shape = [batch_size, num_outputs]
-
+ 
     # setup weights & biases
     self.weights = []
     self.biases = []

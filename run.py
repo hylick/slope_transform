@@ -12,6 +12,7 @@ from gen_data import gen_data
 from pathlib import Path
 import os
 import pickle
+import json
 
 NUM_INPUTS = 2
 NUM_OUTPUTS = NUM_INPUTS
@@ -32,7 +33,7 @@ def main():
   parser.add_argument('--restore_path', default=None)
   parser.add_argument('--vars_file', default=None)
 
-  args = parser.parse_args()
+  args, _  = parser.parse_known_args()
   if args.mode == 'train':
     train(args)
   elif args.mode == 'test':
@@ -58,83 +59,109 @@ def restore_graph(sess,args):
   return trained_model, w, b
 
 def train(args):
+  tf_config = os.environ.get('TF_CONFIG', '{}')
+  tf_config_json = json.loads(tf_config)
+  cluster = tf_config_json.get('cluster', {})
+  job_name = tf_config_json.get('task', {}).get('type', "")
+  task_index = tf_config_json.get('task', {}).get('index', "")
+  ps_hosts = cluster.get("ps")
+  worker_hosts = cluster.get("worker")
 
   graph = tf.Graph()
   var_path = cwd + '/' + args.checkpoint_dir + '/variables/'
+  #ps_hosts = args.ps_hosts.split(",")
+  #worker_hosts = args.worker_hosts.split(",")
 
-  with graph.as_default():
+  # Create a cluster from the parameter server and worker hosts.
+  cluster = tf.train.ClusterSpec({"ps": ps_hosts, "worker": worker_hosts})
 
-    # Graph object and scope created
-    # ...now define all parts of the graph here
-    feed_fwd_model = FF(args, graph)
-    saver = tf.train.Saver()
-    init = tf.global_variables_initializer()
+  # Create and start a server for the local task.
+  server = tf.train.Server(cluster,
+                           job_name=job_name,
+                           task_index=task_index)
 
-    # Now that the graph is defined, create a session to begin running
-    with tf.Session() as sess:
+  if job_name == "ps":
+    server.join()
+  elif job_name == "worker":
+  
+    # Assigns ops to the local worker by default.
+    with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d" % task_index,
+        cluster=cluster)):
 
-      sess.run(init)
-      # Prepare to Save model
-      i = 0
-      model = 'model%s' % i
-      ckpt_file_index = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt.index')
-      ckpt_file = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt')
-      while ckpt_file_index.is_file():
-        i += 1
-        model = 'model%s' % i
-        ckpt_file_index = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt.index')
-      ckpt_file = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt')
+      with graph.as_default():
 
-      num_epochs = int(args.num_epochs)
-      y_acc = np.zeros((int(args.batch_size),int(args.num_outputs)))
-      loss = None
-      y_ = None
+        # Graph object and scope created
+        # ...now define all parts of the graph here
+        feed_fwd_model = FF(args, graph)
+        saver = tf.train.Saver()
+        init = tf.global_variables_initializer()
+
+        # Now that the graph is defined, create a session to begin running
+        with tf.Session() as sess:
+
+          sess.run(init)
+          # Prepare to Save model
+          i = 0
+          model = 'model%s' % i
+          ckpt_file_index = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt.index')
+          ckpt_file = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt')
+          while ckpt_file_index.is_file():
+            i += 1
+            model = 'model%s' % i
+            ckpt_file_index = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt.index')
+          ckpt_file = Path(cwd + '/' + args.checkpoint_dir + '/' + model + '.ckpt')
+
+          num_epochs = int(args.num_epochs)
+          y_acc = np.zeros((int(args.batch_size),int(args.num_outputs)))
+          loss = None
+          y_ = None
       
-      w = []
-      b = []
-      if (args.restore_path != None):
-        trained_model_saver, w, b = restore_graph(sess,args)
-        print('...continuing training')
+          w = []
+          b = []
+          if (args.restore_path != None):
+            trained_model_saver, w, b = restore_graph(sess,args)
+            print('...continuing training')
 
-      # guards against accidental updates to the graph which can cause graph
-      # increase and performance decay over time (with more iterations)
-      sess.graph.finalize()
+          # guards against accidental updates to the graph which can cause graph
+          # increase and performance decay over time (with more iterations)
+          sess.graph.finalize()
 
-      for e in range(num_epochs):
-        w, b, train_input, train_output = gen_data(int(args.batch_size),int(args.num_inputs), w, b)
-        y_, loss, _ = sess.run(feed_fwd_model.run(), feed_dict={feed_fwd_model.x: train_input, feed_fwd_model.y: train_output})
-        y_acc = y_
-        threshold = 1000
-        w_b_saved = False
-        if ((e % 50) == 0):
-          print('epoch: %d - loss: %2f' % (e,loss))
-          if (e > 0 and (e % threshold == 0)):
-            print('Writing checkpoint %d' % e)
-            print(train_output, w, b)
-            print('\n')
-            print(y_acc, sess.run(feed_fwd_model.weights)[0], sess.run(feed_fwd_model.biases)[0])
-            save_path = saver.save(sess, str(ckpt_file), global_step=e)
-            if not w_b_saved:
-              try:
-                with open(var_path + model + '.pkl', 'wb') as f:
-                  pickle.dump([w,b],f)
-                  w_b_saved = True
-              except FileNotFoundError as fnf:
-                os.makedirs(var_path)
-                with open(var_path + model + '.pkl', 'wb') as f:
-                  pickle.dump([w,b],f)
-                  w_b_saved = True
-      save_path = saver.save(sess, str(ckpt_file))
-      if not w_b_saved:
-        try:
-          with open(var_path + model + '.pkl', 'wb') as f:
-            pickle.dump([w,b],f)
-        except FileNotFoundError as fnf:
-          os.makedirs(var_path)
-          with open(var_path + model + '.pkl', 'wb') as f:
-            pickle.dump([w,b],f)
-      print('Model saved to %s' % str(save_path))
-      sess.close()
+          for e in range(num_epochs):
+            w, b, train_input, train_output = gen_data(int(args.batch_size),int(args.num_inputs), w, b)
+            y_, loss, _ = sess.run(feed_fwd_model.run(), feed_dict={feed_fwd_model.x: train_input, feed_fwd_model.y: train_output})
+            y_acc = y_
+            threshold = 1000
+            w_b_saved = False
+            if ((e % 50) == 0):
+              print('epoch: %d - loss: %2f' % (e,loss))
+              if (e > 0 and (e % threshold == 0)):
+                print('Writing checkpoint %d' % e)
+                print(train_output, w, b)
+                print('\n')
+                print(y_acc, sess.run(feed_fwd_model.weights)[0], sess.run(feed_fwd_model.biases)[0])
+                save_path = saver.save(sess, str(ckpt_file), global_step=e)
+                if not w_b_saved:
+                  try:
+                    with open(var_path + model + '.pkl', 'wb') as f:
+                      pickle.dump([w,b],f)
+                      w_b_saved = True
+                  except FileNotFoundError as fnf:
+                    os.makedirs(var_path)
+                    with open(var_path + model + '.pkl', 'wb') as f:
+                      pickle.dump([w,b],f)
+                      w_b_saved = True
+          save_path = saver.save(sess, str(ckpt_file))
+          if not w_b_saved:
+            try:
+              with open(var_path + model + '.pkl', 'wb') as f:
+                pickle.dump([w,b],f)
+            except FileNotFoundError as fnf:
+              os.makedirs(var_path)
+              with open(var_path + model + '.pkl', 'wb') as f:
+                pickle.dump([w,b],f)
+          print('Model saved to %s' % str(save_path))
+          sess.close()
 
 def test(args):
 
@@ -165,4 +192,5 @@ def test(args):
       input('Press Enter to continue...')
 
 if __name__ == '__main__':
+  print(os.environ['TF_CONFIG'])
   main()
