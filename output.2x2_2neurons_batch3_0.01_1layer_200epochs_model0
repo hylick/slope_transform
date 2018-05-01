@@ -1,0 +1,16 @@
+/usr/local/google/home/hylick/bin/anaconda2/envs/hylick-dev/lib/python3.6/site-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+2018-04-30 14:50:59.576546: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+E0430 14:50:59.577835294   67067 tcp_server_posix.cc:65]     check for SO_REUSEPORT: {"created":"@1525125059.577818716","description":"SO_REUSEPORT unavailable on compiling system","file":"external/grpc/src/core/lib/iomgr/socket_utils_common_posix.cc","file_line":162}
+2018-04-30 14:50:59.578035: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2222}
+2018-04-30 14:50:59.578065: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2222}
+2018-04-30 14:50:59.578973: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:333] Started server with target: grpc://localhost:2222
+epoch: 0 - loss: 306.405762
+epoch: 50 - loss: 0.090758
+epoch: 100 - loss: 0.014016
+epoch: 150 - loss: 0.032918
+Model saved to /usr/local/google/home/hylick/Projects/2018/anaconda/tf/slope_transform/checkpoints/model0.ckpt
+
+real	0m1.766s
+user	0m1.644s
+sys	0m0.220s
