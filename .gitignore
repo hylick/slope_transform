@@ -1,6 +1,7 @@
 __pycache__/
 checkpoints/
 checkpoints
+.ipynb_checkpoints/
 foo/
 foobar
 *.pyc
